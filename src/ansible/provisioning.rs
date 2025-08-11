@@ -82,7 +82,6 @@ pub struct ProvisionOptions {
     pub node_env_variables: Option<Vec<(String, String)>>,
     pub output_inventory_dir_path: PathBuf,
     pub peer_cache_node_count: u16,
-    pub performance_verifier_batch_size: Option<u16>,
     pub public_rpc: bool,
     pub random_verifier_batch_size: Option<u16>,
     pub rewards_address: Option<String>,
@@ -102,6 +101,8 @@ pub struct ProvisionOptions {
 pub struct PrivateNodeProvisionInventory {
     pub full_cone_nat_gateway_vms: Vec<VirtualMachine>,
     pub full_cone_private_node_vms: Vec<VirtualMachine>,
+    pub port_restricted_cone_nat_gateway_vms: Vec<VirtualMachine>,
+    pub port_restricted_cone_private_node_vms: Vec<VirtualMachine>,
     pub symmetric_nat_gateway_vms: Vec<VirtualMachine>,
     pub symmetric_private_node_vms: Vec<VirtualMachine>,
 }
@@ -110,10 +111,14 @@ impl PrivateNodeProvisionInventory {
     pub fn new(
         provisioner: &AnsibleProvisioner,
         full_cone_private_node_vm_count: Option<u16>,
+        port_restricted_cone_private_node_vm_count: Option<u16>,
         symmetric_private_node_vm_count: Option<u16>,
     ) -> Result<Self> {
         // All the environment types set private_node_vm count to >0 if not specified.
         let should_provision_full_cone_private_nodes = full_cone_private_node_vm_count
+            .map(|count| count > 0)
+            .unwrap_or(true);
+        let should_provision_port_restricted_cone_private_nodes = port_restricted_cone_private_node_vm_count
             .map(|count| count > 0)
             .unwrap_or(true);
         let should_provision_symmetric_private_nodes = symmetric_private_node_vm_count
@@ -123,6 +128,8 @@ impl PrivateNodeProvisionInventory {
         let mut inventory = Self {
             full_cone_nat_gateway_vms: Default::default(),
             full_cone_private_node_vms: Default::default(),
+            port_restricted_cone_nat_gateway_vms: Default::default(),
+            port_restricted_cone_private_node_vms: Default::default(),
             symmetric_nat_gateway_vms: Default::default(),
             symmetric_private_node_vms: Default::default(),
         };
@@ -152,6 +159,33 @@ impl PrivateNodeProvisionInventory {
 
             inventory.full_cone_private_node_vms = full_cone_private_node_vms;
             inventory.full_cone_nat_gateway_vms = full_cone_nat_gateway_inventory;
+        }
+
+        if should_provision_port_restricted_cone_private_nodes {
+            let port_restricted_cone_private_node_vms = provisioner
+                .ansible_runner
+                .get_inventory(AnsibleInventoryType::PortRestrictedConePrivateNodes, true)
+                .inspect_err(|err| {
+                    println!("Failed to obtain the inventory of Port Restricted Cone private node: {err:?}");
+                })?;
+
+            let port_restricted_cone_nat_gateway_inventory = provisioner
+                .ansible_runner
+                .get_inventory(AnsibleInventoryType::PortRestrictedConeNatGateway, true)
+                .inspect_err(|err| {
+                    println!("Failed to get Port Restricted Cone NAT Gateway inventory {err:?}");
+                })?;
+
+            if port_restricted_cone_nat_gateway_inventory.len() != port_restricted_cone_private_node_vms.len() {
+                println!("The number of Port Restricted Cone private nodes does not match the number of Port Restricted Cone NAT Gateway VMs");
+                return Err(Error::VmCountMismatch(
+                    Some(AnsibleInventoryType::PortRestrictedConePrivateNodes),
+                    Some(AnsibleInventoryType::PortRestrictedConeNatGateway),
+                ));
+            }
+
+            inventory.port_restricted_cone_private_node_vms = port_restricted_cone_private_node_vms;
+            inventory.port_restricted_cone_nat_gateway_vms = port_restricted_cone_nat_gateway_inventory;
         }
 
         if should_provision_symmetric_private_nodes {
@@ -188,6 +222,10 @@ impl PrivateNodeProvisionInventory {
         !self.full_cone_private_node_vms.is_empty()
     }
 
+    pub fn should_provision_port_restricted_cone_private_nodes(&self) -> bool {
+        !self.port_restricted_cone_private_node_vms.is_empty()
+    }
+
     pub fn should_provision_symmetric_private_nodes(&self) -> bool {
         !self.symmetric_private_node_vms.is_empty()
     }
@@ -207,6 +245,15 @@ impl PrivateNodeProvisionInventory {
         Self::match_private_node_vm_and_gateway_vm(
             &self.full_cone_private_node_vms,
             &self.full_cone_nat_gateway_vms,
+        )
+    }
+
+    pub fn port_restricted_cone_private_node_and_gateway_map(
+        &self,
+    ) -> Result<HashMap<VirtualMachine, VirtualMachine>> {
+        Self::match_private_node_vm_and_gateway_vm(
+            &self.port_restricted_cone_private_node_vms,
+            &self.port_restricted_cone_nat_gateway_vms,
         )
     }
 
@@ -285,7 +332,6 @@ impl From<BootstrapOptions> for ProvisionOptions {
             node_env_variables: bootstrap_options.node_env_variables,
             output_inventory_dir_path: bootstrap_options.output_inventory_dir_path,
             peer_cache_node_count: 0,
-            performance_verifier_batch_size: None,
             public_rpc: false,
             random_verifier_batch_size: None,
             rewards_address: Some(bootstrap_options.rewards_address),
@@ -338,7 +384,6 @@ impl From<DeployOptions> for ProvisionOptions {
             node_count: deploy_options.node_count,
             output_inventory_dir_path: deploy_options.output_inventory_dir_path,
             peer_cache_node_count: deploy_options.peer_cache_node_count,
-            performance_verifier_batch_size: None,
             public_rpc: deploy_options.public_rpc,
             random_verifier_batch_size: None,
             rewards_address: Some(deploy_options.rewards_address),
@@ -391,7 +436,6 @@ impl From<ClientsDeployOptions> for ProvisionOptions {
             node_env_variables: None,
             output_inventory_dir_path: client_options.output_inventory_dir_path,
             peer_cache_node_count: 0,
-            performance_verifier_batch_size: client_options.performance_verifier_batch_size,
             public_rpc: false,
             random_verifier_batch_size: client_options.random_verifier_batch_size,
             rewards_address: None,
@@ -925,6 +969,10 @@ impl AnsibleProvisioner {
                     options.peer_cache_node_count,
                 )
             }
+            NodeType::PortRestrictedConePrivateNode => (
+                node_type.to_ansible_inventory_type(),
+                options.port_restricted_cone_private_node_count,
+            ),
             NodeType::SymmetricPrivateNode => (
                 node_type.to_ansible_inventory_type(),
                 options.symmetric_private_node_count,
