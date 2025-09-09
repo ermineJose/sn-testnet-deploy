@@ -21,6 +21,7 @@ use std::{
 #[derive(Clone, Debug)]
 pub struct RoutedVms {
     full_cone_private_node_nat_gateway_ip_map: HashMap<VirtualMachine, IpAddr>,
+    port_restricted_cone_private_node_nat_gateway_ip_map: HashMap<VirtualMachine, IpAddr>,
     symmetric_private_node_nat_gateway_ip_map: HashMap<VirtualMachine, IpAddr>,
 }
 
@@ -110,6 +111,48 @@ impl SshClient {
             None => {
                 *write_access = Some(RoutedVms {
                     full_cone_private_node_nat_gateway_ip_map,
+                    port_restricted_cone_private_node_nat_gateway_ip_map: HashMap::new(),
+                    symmetric_private_node_nat_gateway_ip_map: HashMap::new(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Set the list of VMs that are routed through a Port Restricted Cone NAT Gateway.
+    /// This updates all the copies of the `SshClient` that have been cloned.
+    pub fn set_port_restricted_cone_nat_routed_vms(
+        &self,
+        private_node_vms: &[VirtualMachine],
+        nat_gateway_vms: &[VirtualMachine],
+    ) -> Result<()> {
+        let private_node_nat_gateway_map =
+            PrivateNodeProvisionInventory::match_private_node_vm_and_gateway_vm(
+                private_node_vms,
+                nat_gateway_vms,
+            )?;
+        let port_restricted_cone_private_node_nat_gateway_ip_map = private_node_nat_gateway_map
+            .into_iter()
+            .map(|(private_node_vm, nat_gateway_vm)| {
+                (private_node_vm, nat_gateway_vm.public_ip_addr)
+            })
+            .collect::<HashMap<_, _>>();
+        let mut write_access = self.routed_vms.write().map_err(|err| {
+            log::error!("Failed to set routed VMs: {err}");
+            Error::SshSettingsRwLockError
+        })?;
+        debug!("Port Restricted Cone Private node Routed VMs have been set to: {port_restricted_cone_private_node_nat_gateway_ip_map:?}");
+
+        match write_access.as_mut() {
+            Some(routed_vms) => {
+                routed_vms.port_restricted_cone_private_node_nat_gateway_ip_map =
+                    port_restricted_cone_private_node_nat_gateway_ip_map;
+            }
+            None => {
+                *write_access = Some(RoutedVms {
+                    full_cone_private_node_nat_gateway_ip_map: HashMap::new(),
+                    port_restricted_cone_private_node_nat_gateway_ip_map,
                     symmetric_private_node_nat_gateway_ip_map: HashMap::new(),
                 });
             }
@@ -150,6 +193,7 @@ impl SshClient {
             None => {
                 *write_access = Some(RoutedVms {
                     full_cone_private_node_nat_gateway_ip_map: HashMap::new(),
+                    port_restricted_cone_private_node_nat_gateway_ip_map: HashMap::new(),
                     symmetric_private_node_nat_gateway_ip_map,
                 });
             }

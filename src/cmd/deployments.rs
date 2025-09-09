@@ -349,6 +349,10 @@ pub async fn handle_deploy(
         .unwrap_or(environment_type.get_default_symmetric_private_node_count());
     let full_cone_private_node_count = full_cone_private_node_count
         .unwrap_or(environment_type.get_default_full_cone_private_node_count());
+    let upnp_private_node_count =
+        upnp_private_node_count.unwrap_or(environment_type.get_default_upnp_private_node_count());
+    let port_restricted_cone_private_node_count = 
+        environment_type.get_default_port_restricted_cone_private_node_count();
 
     let deploy_options = DeployOptions {
         binary_option: binary_option.clone(),

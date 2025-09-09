@@ -336,6 +336,34 @@ impl TestnetDeployer {
             }
         }
 
+        if private_node_inventory.should_provision_port_restricted_cone_private_nodes() {
+            self.ansible_provisioner
+                .print_ansible_run_banner("Provision Port Restricted Cone NAT Gateway");
+            self.ansible_provisioner
+                .provision_port_restricted_cone_nat_gateway(&provision_options, &private_node_inventory)
+                .map_err(|err| {
+                    println!("Failed to provision Port Restricted Cone NAT gateway {err:?}");
+                    err
+                })?;
+
+            self.ansible_provisioner
+                .print_ansible_run_banner("Provision Port Restricted Cone Private Nodes");
+            match self.ansible_provisioner.provision_port_restricted_cone_private_nodes(
+                &mut provision_options,
+                Some(genesis_multiaddr.clone()),
+                Some(genesis_network_contacts.clone()),
+                &private_node_inventory,
+            ) {
+                Ok(()) => {
+                    println!("Provisioned Port Restricted Cone private nodes");
+                }
+                Err(err) => {
+                    error!("Failed to provision Port Restricted Cone Private nodes: {err}");
+                    node_provision_failed = true;
+                }
+            }
+        }
+
         if private_node_inventory.should_provision_symmetric_private_nodes() {
             self.ansible_provisioner
                 .print_ansible_run_banner("Provision Symmetric NAT Gateway");

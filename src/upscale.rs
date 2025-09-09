@@ -603,6 +603,8 @@ impl TestnetDeployer {
                 .join("ansible")
                 .join("inventory"),
             peer_cache_node_count: 0,
+            performance_verifier_batch_size: None,
+            port_restricted_cone_private_node_count: 0,
             public_rpc: options.public_rpc,
             random_verifier_batch_size: None,
             rewards_address: options
